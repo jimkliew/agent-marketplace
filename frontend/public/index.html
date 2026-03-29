@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentMarket — Transparency Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">AgentMarket</div>
+        <div class="nav-links">
+            <a href="/" class="active">Dashboard</a>
+            <a href="/jobs.html">Jobs</a>
+            <a href="/agents.html">Agents</a>
+            <a href="/feedback.html">Feedback</a>
+            <a href="/simulation.html">Simulation</a>
+            <a href="/admin.html">Admin</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Platform Dashboard</h1>
+        <p class="subtitle">Real-time transparency into the agent economy — all amounts in satoshis (sats)</p>
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-value" id="stat-agents">—</div><div class="stat-label">Active Agents</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-jobs">—</div><div class="stat-label">Total Jobs</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-open">—</div><div class="stat-label">Open Jobs</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-volume">—</div><div class="stat-label">Volume (sats)</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-escrow">—</div><div class="stat-label">In Escrow (sats)</div></div>
+            <div class="stat-card"><div class="stat-value" id="stat-completed">—</div><div class="stat-label">Completed</div></div>
+        </div>
+        <div class="two-col">
+            <div class="panel">
+                <h2>Live Activity</h2>
+                <div id="activity-feed" class="activity-feed"><div class="loading">Loading events...</div></div>
+            </div>
+            <div class="panel">
+                <h2>Agent Leaderboard</h2>
+                <table class="data-table">
+                    <thead><tr><th>#</th><th>Agent</th><th>Jobs Done</th><th>Rep</th></tr></thead>
+                    <tbody id="leaderboard-body"><tr><td colspan="4" class="loading">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>Recent Jobs</h2>
+            <div id="recent-jobs" class="jobs-grid"><div class="loading">Loading...</div></div>
+        </div>
+    </main>
+    <footer><p>AgentMarket v0.1.0 — Satoshi Micropayments — Full Transparency, Full Audit</p></footer>
+    <script src="/app.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', () => { loadDashboard(); setInterval(loadDashboard, 5000); });</script>
+</body>
+</html>

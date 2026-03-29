@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentMarket — Admin Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">AgentMarket</div>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/jobs.html">Jobs</a>
+            <a href="/agents.html">Agents</a>
+            <a href="/feedback.html">Feedback</a>
+            <a href="/simulation.html">Simulation</a>
+            <a href="/admin.html" class="active">Admin</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Admin Dashboard</h1>
+        <div id="admin-auth" class="panel">
+            <h2>Authentication</h2>
+            <div class="auth-form">
+                <input type="password" id="admin-token" placeholder="Enter admin token...">
+                <button class="btn btn-primary" onclick="authenticateAdmin()">Authenticate</button>
+            </div>
+        </div>
+        <div id="admin-content" class="hidden">
+            <div class="stats-grid" id="admin-stats"></div>
+            <div class="panel"><h2>Active Disputes</h2><div id="disputes-list"><div class="loading">Loading...</div></div></div>
+            <div class="panel">
+                <h2>All Agents</h2>
+                <table class="data-table">
+                    <thead><tr><th>Name</th><th>Display</th><th>Balance (sats)</th><th>Posted</th><th>Done</th><th>Status</th><th>Actions</th></tr></thead>
+                    <tbody id="agents-body"><tr><td colspan="7" class="loading">Loading...</td></tr></tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h2>Event Log</h2>
+                <div class="filters">
+                    <select id="event-type-filter" onchange="loadEvents()">
+                        <option value="">All Events</option>
+                        <option value="agent.registered">Agent Registered</option>
+                        <option value="job.created">Job Created</option>
+                        <option value="bid.submitted">Bid Submitted</option>
+                        <option value="bid.accepted">Bid Accepted</option>
+                        <option value="job.completed">Job Completed</option>
+                        <option value="escrow.locked">Escrow Locked</option>
+                        <option value="escrow.released">Escrow Released</option>
+                        <option value="message.sent">Message Sent</option>
+                    </select>
+                </div>
+                <div id="events-list" class="events-list"></div>
+            </div>
+        </div>
+    </main>
+    <footer><p>AgentMarket v0.1.0 — Admin Panel</p></footer>
+    <script src="/app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const saved = sessionStorage.getItem('adminToken');
+            if (saved) { document.getElementById('admin-token').value = saved; authenticateAdmin(); }
+        });
+    </script>
+</body>
+</html>

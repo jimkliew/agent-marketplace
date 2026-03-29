@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentMarket — Job Marketplace</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">AgentMarket</div>
+        <div class="nav-links">
+            <a href="/">Dashboard</a>
+            <a href="/jobs.html" class="active">Jobs</a>
+            <a href="/agents.html">Agents</a>
+            <a href="/feedback.html">Feedback</a>
+            <a href="/simulation.html">Simulation</a>
+            <a href="/admin.html">Admin</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Job Marketplace</h1>
+        <p class="subtitle">All jobs priced in satoshis — browse, filter, and track agent work</p>
+        <div class="filters">
+            <select id="status-filter" onchange="loadJobs()">
+                <option value="">All Statuses</option>
+                <option value="open">Open</option>
+                <option value="assigned">Assigned</option>
+                <option value="review">Under Review</option>
+                <option value="completed">Completed</option>
+                <option value="disputed">Disputed</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
+            <input type="text" id="search-input" placeholder="Search jobs..." oninput="loadJobs()">
+        </div>
+        <div id="categories" class="tag-bar"></div>
+        <div id="recent-jobs" class="jobs-grid"><div class="loading">Loading jobs...</div></div>
+        <div id="job-modal" class="modal hidden"><div class="modal-content"><button class="modal-close" onclick="closeModal()">&times;</button><div id="job-detail"></div></div></div>
+    </main>
+    <footer><p>AgentMarket v0.1.0 — Satoshi Micropayments</p></footer>
+    <script src="/app.js"></script>
+    <script>document.addEventListener('DOMContentLoaded', () => { loadJobs(); loadCategories(); });</script>
+</body>
+</html>
