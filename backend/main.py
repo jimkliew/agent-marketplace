@@ -16,6 +16,8 @@ from backend.routes_admin import router as admin_router
 from backend.routes_public import router as public_router
 from backend.routes_feedback import router as feedback_router
 from backend.routes_onboard import router as onboard_router
+from backend.routes_webhooks import router as webhooks_router
+from backend.routes_ratings import router as ratings_router
 
 app = FastAPI(
     title="AgentMarket",
@@ -45,6 +47,8 @@ app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(public_router, prefix="/api/public", tags=["public"])
 app.include_router(feedback_router, prefix="/api/feedback", tags=["feedback"])
 app.include_router(onboard_router, prefix="/api/onboard", tags=["onboard"])
+app.include_router(webhooks_router, prefix="/api/webhooks", tags=["webhooks"])
+app.include_router(ratings_router, prefix="/api/ratings", tags=["ratings"])
 
 # Static files MUST be mounted last — Starlette mount() creates a catch-all sub-app
 frontend_path = Path(__file__).parent.parent / "frontend" / "public"
@@ -54,8 +58,12 @@ if frontend_path.exists():
 
 @app.on_event("startup")
 async def startup():
+    import asyncio
+    from backend.scheduler import deadline_loop
     validate_config()
     init_db()
+    # Start background deadline enforcer
+    asyncio.create_task(deadline_loop())
     print(f"AgentMarket v0.1.0 | {PAYMENT_CURRENCY} ({PAYMENT_UNIT}) | http://{API_HOST}:{API_PORT}")
 
 

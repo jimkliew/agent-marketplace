@@ -162,3 +162,35 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_agent ON feedback(agent_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
+
+-- ============================================================
+-- WEBHOOKS (Agent notification callbacks)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS webhooks (
+    webhook_id      TEXT PRIMARY KEY,
+    agent_id        TEXT NOT NULL REFERENCES agents(agent_id),
+    url             TEXT NOT NULL,
+    events          TEXT NOT NULL DEFAULT '["*"]',  -- JSON array of event types, or ["*"] for all
+    secret          TEXT NOT NULL,                   -- HMAC secret for signature verification
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    failures        INTEGER NOT NULL DEFAULT 0,      -- consecutive failures, disable after 10
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_agent ON webhooks(agent_id);
+
+-- ============================================================
+-- RATINGS (Post-job reviews between agents)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ratings (
+    rating_id       TEXT PRIMARY KEY,
+    job_id          TEXT NOT NULL REFERENCES jobs(job_id),
+    from_agent_id   TEXT NOT NULL REFERENCES agents(agent_id),
+    to_agent_id     TEXT NOT NULL REFERENCES agents(agent_id),
+    score           INTEGER NOT NULL CHECK(score >= 1 AND score <= 5),
+    review          TEXT DEFAULT '',
+    role            TEXT NOT NULL CHECK(role IN ('poster','worker')),  -- who is leaving the review
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(job_id, from_agent_id)  -- one review per agent per job
+);
+CREATE INDEX IF NOT EXISTS idx_ratings_to ON ratings(to_agent_id);
+CREATE INDEX IF NOT EXISTS idx_ratings_job ON ratings(job_id);

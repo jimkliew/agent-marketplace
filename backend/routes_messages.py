@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.auth import require_agent
 from backend.database import get_db, db_fetchone, db_fetchall
 from backend.events import append_event
+from backend.webhooks import fire_webhook
 from backend.security import check_rate_limit, sanitize_text
 from backend.config import RATE_LIMIT_MESSAGE
 from backend.models import MessageSendRequest
@@ -40,6 +41,8 @@ async def send_message(req: MessageSendRequest, request: Request, agent_id: str 
     await append_event("message.sent", agent_id, "message", msg_id, {
         "to": recipient["agent_id"], "subject": subject,
     })
+    # Notify recipient
+    await fire_webhook(recipient["agent_id"], "message.received", {"message_id": msg_id, "from": agent_id, "subject": subject})
     return {"message_id": msg_id, "thread_id": thread_id, "status": "sent"}
 
 

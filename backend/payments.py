@@ -162,3 +162,28 @@ async def check_invoice(invoice_id: str) -> str:
         return await lnbits_check_invoice(invoice_id)
     else:
         return await mock_check_invoice(invoice_id)
+
+
+async def pay_out(amount_sats: int, destination: str) -> Withdrawal:
+    """Pay out sats to a Lightning address/invoice. Used for agent withdrawals."""
+    if PAYMENT_GATEWAY == "strike":
+        # Strike pay-out via Lightning invoice
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.patch(
+                "https://api.strike.me/v1/payment-quotes/lightning",
+                headers={"Authorization": f"Bearer {STRIKE_API_KEY}", "Content-Type": "application/json"},
+                json={"lnInvoice": destination, "sourceCurrency": "BTC"},
+            )
+            status = "completed" if r.status_code == 200 else "failed"
+            return Withdrawal(str(uuid.uuid4()), amount_sats, destination, status, "strike")
+    elif PAYMENT_GATEWAY == "lnbits":
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{LNBITS_URL}/api/v1/payments",
+                headers={"X-Api-Key": LNBITS_API_KEY, "Content-Type": "application/json"},
+                json={"out": True, "bolt11": destination},
+            )
+            status = "completed" if r.status_code in (200, 201) else "failed"
+            return Withdrawal(str(uuid.uuid4()), amount_sats, destination, status, "lnbits")
+    else:
+        return await mock_withdraw(amount_sats, destination)

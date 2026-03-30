@@ -11,6 +11,7 @@ from backend.escrow import lock_funds, release_funds, refund_funds
 from backend.security import check_rate_limit, sanitize_text
 from backend.config import RATE_LIMIT_JOB_POST, RATE_LIMIT_BID, PAYMENT_UNIT
 from backend.models import JobCreateRequest, JobResponse, JobSubmitRequest, BidCreateRequest
+from backend.webhooks import fire_webhook
 
 router = APIRouter()
 
@@ -113,6 +114,8 @@ async def submit_bid(job_id: str, req: BidCreateRequest, request: Request, agent
         raise HTTPException(409, "You already bid on this job")
 
     await append_event("bid.submitted", agent_id, "bid", bid_id, {"job_id": job_id, "amount": req.amount, "unit": PAYMENT_UNIT})
+    # Notify job poster: someone bid on your job
+    await fire_webhook(job["poster_id"], "bid.received", {"job_id": job_id, "bid_id": bid_id, "amount": req.amount, "bidder_id": agent_id})
     return {"bid_id": bid_id, "status": "pending"}
 
 
@@ -139,6 +142,8 @@ async def accept_bid(job_id: str, bid_id: str, request: Request, agent_id: str =
     await asyncio.to_thread(_accept)
     await append_event("bid.accepted", agent_id, "bid", bid_id, {"bidder_id": bid["bidder_id"]})
     await append_event("job.assigned", agent_id, "job", job_id, {"assigned_to": bid["bidder_id"]})
+    # Notify worker: your bid was accepted
+    await fire_webhook(bid["bidder_id"], "job.assigned", {"job_id": job_id, "bid_id": bid_id})
     return {"status": "assigned", "assigned_to": bid["bidder_id"]}
 
 
@@ -158,6 +163,10 @@ async def submit_work(job_id: str, req: JobSubmitRequest, request: Request, agen
             conn.execute("UPDATE jobs SET status = 'review', result = ?, updated_at = datetime('now') WHERE job_id = ?", (result, job_id))
     await asyncio.to_thread(_submit)
     await append_event("job.submitted", agent_id, "job", job_id, {"result_preview": result[:200]})
+    # Notify poster: worker submitted deliverable
+    poster = await db_fetchone("SELECT poster_id FROM jobs WHERE job_id = ?", (job_id,))
+    if poster:
+        await fire_webhook(poster["poster_id"], "work.submitted", {"job_id": job_id, "worker_id": agent_id})
     return {"status": "review"}
 
 
@@ -184,6 +193,8 @@ async def approve_work(job_id: str, request: Request, agent_id: str = Depends(re
     await asyncio.to_thread(_approve)
     await append_event("job.completed", agent_id, "job", job_id, {"worker": job["assigned_to"]})
     await append_event("escrow.released", "system", "escrow", escrow["escrow_id"], {"payee": job["assigned_to"]})
+    # Notify worker: you got paid!
+    await fire_webhook(job["assigned_to"], "payment.released", {"job_id": job_id, "escrow_id": escrow["escrow_id"]})
     return {"status": "completed"}
 
 
