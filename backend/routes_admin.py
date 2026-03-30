@@ -37,6 +37,83 @@ async def admin_stats(_=Depends(require_admin)):
     return stats
 
 
+@router.get("/metrics")
+async def admin_metrics(days: int = 1, _=Depends(require_admin)):
+    """Daily metrics: signups, transactions, revenue. The numbers that matter."""
+    m = {}
+    # Agent signups today
+    signups = await db_fetchone(
+        "SELECT COUNT(*) as c FROM agents WHERE created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["signups"] = signups["c"]
+
+    # Jobs completed today
+    completed = await db_fetchone(
+        "SELECT COUNT(*) as c FROM jobs WHERE status='completed' AND updated_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["jobs_completed"] = completed["c"]
+
+    # Jobs posted today
+    posted = await db_fetchone(
+        "SELECT COUNT(*) as c FROM jobs WHERE created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["jobs_posted"] = posted["c"]
+
+    # Bids today
+    bids = await db_fetchone(
+        "SELECT COUNT(*) as c FROM bids WHERE created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["bids_submitted"] = bids["c"]
+
+    # Revenue today (platform fees)
+    rev = await db_fetchone(
+        "SELECT COALESCE(SUM(amount),0) as s, COUNT(*) as c FROM ledger WHERE tx_type='platform_fee' AND created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["revenue_sats"] = rev["s"]
+    m["fee_transactions"] = rev["c"]
+
+    # Transaction volume today
+    vol = await db_fetchone(
+        "SELECT COALESCE(SUM(amount),0) as s FROM ledger WHERE tx_type='escrow_release' AND created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["volume_sats"] = vol["s"]
+
+    # Deposits today
+    deps = await db_fetchone(
+        "SELECT COALESCE(SUM(amount),0) as s, COUNT(*) as c FROM ledger WHERE tx_type='deposit' AND created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["deposits_sats"] = deps["s"]
+    m["deposit_count"] = deps["c"]
+
+    # Withdrawals today
+    withdrawals = await db_fetchone(
+        "SELECT COALESCE(SUM(amount),0) as s, COUNT(*) as c FROM ledger WHERE tx_type='withdrawal' AND created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["withdrawals_sats"] = withdrawals["s"]
+    m["withdrawal_count"] = withdrawals["c"]
+
+    # Messages today
+    msgs = await db_fetchone(
+        "SELECT COUNT(*) as c FROM messages WHERE created_at >= datetime('now', ?)",
+        (f"-{days} days",),
+    )
+    m["messages_sent"] = msgs["c"]
+
+    m["period_days"] = days
+    m["target_revenue_sats"] = 1000
+    m["target_pct"] = round((m["revenue_sats"] / 1000) * 100, 1) if m["revenue_sats"] > 0 else 0
+
+    return m
+
+
 @router.get("/events")
 async def admin_events(event_type: str | None = None, entity_type: str | None = None, limit: int = 100, offset: int = 0, _=Depends(require_admin)):
     return await query_events(event_type=event_type, entity_type=entity_type, limit=min(limit, 500), offset=offset)

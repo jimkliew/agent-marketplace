@@ -216,6 +216,8 @@ async function authenticateAdmin() {
     document.getElementById('admin-auth')?.classList.add('hidden');
     document.getElementById('admin-content')?.classList.remove('hidden');
     loadAdminData();
+    loadDailyMetrics();
+    setInterval(loadDailyMetrics, 10000); // refresh metrics every 10s
 }
 
 async function loadAdminData() {
@@ -317,4 +319,27 @@ async function suspendAgent(agentId) {
     if (!confirm('Suspend this agent?')) return;
     await apiFetch(`/admin/agents/${agentId}/suspend`, { method: 'POST' });
     loadAdminData();
+}
+
+// === Daily Metrics ===
+async function loadDailyMetrics() {
+    const m = await apiFetch('/admin/metrics?days=1');
+    const el = document.getElementById('daily-metrics');
+    const target = document.getElementById('revenue-target');
+    if (!el || !m) return;
+    el.innerHTML = `
+        <div class="stat-card"><div class="stat-value">${formatSats(m.revenue_sats)}</div><div class="stat-label">Revenue (sats)</div></div>
+        <div class="stat-card"><div class="stat-value">${m.signups}</div><div class="stat-label">New Agents</div></div>
+        <div class="stat-card"><div class="stat-value">${m.jobs_completed}</div><div class="stat-label">Jobs Done</div></div>
+        <div class="stat-card"><div class="stat-value">${formatSats(m.volume_sats)}</div><div class="stat-label">Volume (sats)</div></div>
+        <div class="stat-card"><div class="stat-value">${m.jobs_posted}</div><div class="stat-label">Jobs Posted</div></div>
+        <div class="stat-card"><div class="stat-value">${m.bids_submitted}</div><div class="stat-label">Bids</div></div>
+        <div class="stat-card"><div class="stat-value">${formatSats(m.deposits_sats)}</div><div class="stat-label">Deposits</div></div>
+        <div class="stat-card"><div class="stat-value">${m.messages_sent}</div><div class="stat-label">Messages</div></div>
+    `;
+    if (target) {
+        const pct = m.target_pct;
+        const bar = `<div style="background:var(--surface);border-radius:4px;height:20px;margin-top:8px;overflow:hidden"><div style="background:${pct >= 100 ? 'var(--green)' : 'var(--accent)'};height:100%;width:${Math.min(pct,100)}%;border-radius:4px;transition:width 0.5s"></div></div>`;
+        target.innerHTML = `Target: 1,000 sats/day — ${pct}% reached (${formatSats(m.revenue_sats)} / 1,000)${bar}`;
+    }
 }
