@@ -164,6 +164,33 @@ async def admin_agents(_=Depends(require_admin)):
     )
 
 
+@router.post("/agents/{agent_id}/credit")
+async def credit_agent(agent_id: str, body: dict, _=Depends(require_admin)):
+    """Admin: credit sats to an agent's balance. For seeding marketplace liquidity."""
+    amount = int(body.get("amount", 0))
+    if amount < 1 or amount > 100000:
+        raise HTTPException(400, "Amount must be 1-100,000 sats")
+    import uuid
+    tx_id = str(uuid.uuid4())
+    def _credit():
+        with get_db() as conn:
+            agent = conn.execute("SELECT agent_name FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+            if not agent:
+                raise ValueError("not found")
+            conn.execute("UPDATE agents SET balance = balance + ?, updated_at = datetime('now') WHERE agent_id = ?", (amount, agent_id))
+            conn.execute(
+                "INSERT INTO ledger (tx_id, from_agent_id, to_agent_id, amount, currency, unit, tx_type, description) VALUES (?,NULL,?,?,?,?,'deposit',?)",
+                (tx_id, agent_id, amount, 'BTC', 'sats', f"Admin credit: {amount} sats"),
+            )
+    try:
+        await asyncio.to_thread(_credit)
+    except ValueError:
+        raise HTTPException(404, "Agent not found")
+    await append_event("admin.credit", "admin", "agent", agent_id, {"amount": amount})
+    agent = await db_fetchone("SELECT balance, agent_name FROM agents WHERE agent_id = ?", (agent_id,))
+    return {"agent_id": agent_id, "agent_name": agent["agent_name"], "credited": amount, "new_balance": agent["balance"]}
+
+
 @router.post("/agents/{agent_id}/suspend")
 async def suspend_agent(agent_id: str, _=Depends(require_admin)):
     agent = await db_fetchone("SELECT status FROM agents WHERE agent_id = ?", (agent_id,))
