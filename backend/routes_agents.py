@@ -15,6 +15,7 @@ router = APIRouter()
 
 
 WELCOME_BONUS = int(os.getenv("WELCOME_BONUS", "1000"))  # 1,000 sats free on signup
+WELCOME_BONUS_CAP = int(os.getenv("WELCOME_BONUS_CAP", "100"))  # First 100 agents only
 
 
 @router.post("/register", response_model=AgentRegisterResponse)
@@ -36,19 +37,23 @@ async def register_agent(req: AgentRegisterRequest, request: Request):
             existing = conn.execute("SELECT 1 FROM agents WHERE agent_name = ?", (name,)).fetchone()
             if existing:
                 raise ValueError("duplicate")
-            # Register with welcome bonus
+            # Check if welcome bonus still available (first 100 agents only)
+            agent_count = conn.execute("SELECT COUNT(*) as c FROM agents").fetchone()["c"]
+            bonus = WELCOME_BONUS if agent_count < WELCOME_BONUS_CAP else 0
+            # Register
             conn.execute(
                 "INSERT INTO agents (agent_id, agent_name, display_name, description, token_hash, balance) VALUES (?,?,?,?,?,?)",
-                (agent_id, name, display, desc, token_hashed, WELCOME_BONUS),
+                (agent_id, name, display, desc, token_hashed, bonus),
             )
             # Ledger entry for welcome bonus
-            if WELCOME_BONUS > 0:
+            if bonus > 0:
                 import uuid as _uuid
                 tx_id = str(_uuid.uuid4())
                 conn.execute(
                     "INSERT INTO ledger (tx_id, from_agent_id, to_agent_id, amount, currency, unit, tx_type, description) VALUES (?,NULL,?,?,?,?,'deposit',?)",
-                    (tx_id, agent_id, WELCOME_BONUS, 'BTC', 'sats', f"Welcome bonus: {WELCOME_BONUS} sats"),
+                    (tx_id, agent_id, bonus, 'BTC', 'sats', f"Welcome bonus: {bonus} sats (agent #{agent_count + 1} of {WELCOME_BONUS_CAP})"),
                 )
+            return bonus
             # Referral tracking
             if referrer:
                 ref_agent = conn.execute("SELECT agent_id FROM agents WHERE agent_name = ?", (referrer,)).fetchone()
@@ -59,15 +64,15 @@ async def register_agent(req: AgentRegisterRequest, request: Request):
                          json.dumps({"referred": name, "referrer": referrer})),
                     )
     try:
-        await asyncio.to_thread(_create)
+        bonus = await asyncio.to_thread(_create)
     except ValueError:
         raise HTTPException(409, f"Agent name '{name}' already taken")
 
     await append_event("agent.registered", agent_id, "agent", agent_id,
-        {"agent_name": name, "welcome_bonus": WELCOME_BONUS, "referrer": referrer}, ip)
+        {"agent_name": name, "welcome_bonus": bonus, "referrer": referrer}, ip)
     return AgentRegisterResponse(
         agent_id=agent_id, agent_name=name, token=token,
-        balance=WELCOME_BONUS, email=f"{name}@agentmarket.local",
+        balance=bonus, email=f"{name}@agentmarket.local",
     )
 
 
