@@ -1,33 +1,31 @@
-app = "agent-marketplace"
-primary_region = "iad"
+app = 'agent-marketplace'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "Dockerfile"
-
-[env]
-  API_HOST = "0.0.0.0"
-  API_PORT = "8000"
-  PAYMENT_CURRENCY = "BTC"
-  PAYMENT_UNIT = "sats"
-  MIN_DEPOSIT = "1000"
-  MAX_TRANSACTION = "100000"
-  PLATFORM_FEE_BPS = "50"
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
+  processes = ['app']
 
-  [http_service.checks]
-    [http_service.checks.health]
-      interval = "30s"
-      timeout = "5s"
-      grace_period = "10s"
-      method = "GET"
-      path = "/api/health"
+[checks]
+  [checks.health]
+    port = 8000
+    type = "http"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
 
 [mounts]
   source = "agentmarket_data"
   destination = "/app/data"
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
