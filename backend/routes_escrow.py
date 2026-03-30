@@ -1,10 +1,11 @@
 """Deposits (with real Lightning support) and financial queries. All amounts in satoshis."""
 
+import os
 import uuid
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.auth import require_agent
-from backend.database import get_db, db_fetchone, db_fetchall
+from backend.database import get_db, get_db_exclusive, db_fetchone, db_fetchall
 from backend.events import append_event
 from backend.config import PAYMENT_CURRENCY, PAYMENT_UNIT, MAX_TRANSACTION, MIN_DEPOSIT
 from backend.models import DepositRequest
@@ -26,7 +27,7 @@ async def deposit_funds(req: DepositRequest, request: Request, agent_id: str = D
         # Mock mode or instant payment — credit immediately
         tx_id = str(uuid.uuid4())
         def _deposit():
-            with get_db() as conn:
+            with get_db_exclusive() as conn:
                 conn.execute(
                     "UPDATE agents SET balance = balance + ?, updated_at = datetime('now') WHERE agent_id = ?",
                     (req.amount, agent_id),
@@ -62,21 +63,36 @@ async def check_deposit_invoice(invoice_id: str, request: Request, agent_id: str
     return {"invoice_id": invoice_id, "status": status}
 
 
+DAILY_WITHDRAWAL_LIMIT = int(os.getenv("DAILY_WITHDRAWAL_LIMIT", "50000"))  # 50k sats/day
+
+
 @router.post("/withdraw")
 async def withdraw_funds(request: Request, agent_id: str = Depends(require_agent)):
-    """Withdraw sats to a Lightning invoice. Agent's balance is deducted."""
+    """Withdraw sats to a Lightning invoice. Daily limit enforced. Balance deducted atomically."""
     body = await request.json()
     amount = int(body.get("amount", 0))
-    destination = str(body.get("destination", ""))  # bolt11 invoice or Lightning address
+    destination = str(body.get("destination", ""))
     if amount < 100:
         raise HTTPException(400, f"Minimum withdrawal: 100 {PAYMENT_UNIT}")
+    if amount > DAILY_WITHDRAWAL_LIMIT:
+        raise HTTPException(400, f"Max single withdrawal: {DAILY_WITHDRAWAL_LIMIT} {PAYMENT_UNIT}")
     if not destination:
         raise HTTPException(400, "destination required (Lightning invoice or address)")
 
-    # Check balance
-    agent = await db_fetchone("SELECT balance FROM agents WHERE agent_id = ?", (agent_id,))
+    # Check balance AND daily limit atomically
+    agent = await db_fetchone(
+        "SELECT balance, daily_withdrawal, last_withdrawal_date FROM agents WHERE agent_id = ?",
+        (agent_id,),
+    )
     if not agent or agent["balance"] < amount:
-        raise HTTPException(400, f"Insufficient balance. Have {agent['balance'] if agent else 0}, need {amount} {PAYMENT_UNIT}")
+        raise HTTPException(400, f"Insufficient balance")
+
+    # Daily limit check
+    today = await db_fetchone("SELECT date('now') as today")
+    daily_used = agent["daily_withdrawal"] if agent["last_withdrawal_date"] == today["today"] else 0
+    if daily_used + amount > DAILY_WITHDRAWAL_LIMIT:
+        remaining = DAILY_WITHDRAWAL_LIMIT - daily_used
+        raise HTTPException(400, f"Daily withdrawal limit: {DAILY_WITHDRAWAL_LIMIT} {PAYMENT_UNIT}. Remaining today: {remaining}")
 
     # Process payout
     from backend.payments import pay_out
@@ -85,8 +101,12 @@ async def withdraw_funds(request: Request, agent_id: str = Depends(require_agent
     if withdrawal.status == "completed":
         tx_id = str(uuid.uuid4())
         def _withdraw():
-            with get_db() as conn:
-                conn.execute("UPDATE agents SET balance = balance - ?, updated_at = datetime('now') WHERE agent_id = ?", (amount, agent_id))
+            with get_db_exclusive() as conn:
+                # Re-check balance inside exclusive lock (double-spend protection)
+                bal = conn.execute("SELECT balance FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+                if not bal or bal["balance"] < amount:
+                    raise ValueError("Insufficient balance (concurrent modification)")
+                conn.execute("UPDATE agents SET balance = balance - ?, daily_withdrawal = CASE WHEN last_withdrawal_date = date('now') THEN daily_withdrawal + ? ELSE ? END, last_withdrawal_date = date('now'), updated_at = datetime('now') WHERE agent_id = ?", (amount, amount, amount, agent_id))
                 conn.execute(
                     "INSERT INTO ledger (tx_id, from_agent_id, to_agent_id, amount, currency, unit, tx_type, description) VALUES (?,?,NULL,?,?,?,'withdrawal',?)",
                     (tx_id, agent_id, amount, PAYMENT_CURRENCY, PAYMENT_UNIT, f"Withdrew {amount} {PAYMENT_UNIT} to {destination[:30]}..."),

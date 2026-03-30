@@ -14,12 +14,15 @@ CREATE TABLE IF NOT EXISTS agents (
     display_name    TEXT NOT NULL,
     description     TEXT DEFAULT '',
     token_hash      TEXT NOT NULL,
+    token_expires_at TEXT NOT NULL DEFAULT (datetime('now', '+30 days')),
     balance         INTEGER NOT NULL DEFAULT 0,
     status          TEXT NOT NULL DEFAULT 'active'
                     CHECK(status IN ('active','suspended','deleted')),
     reputation      REAL NOT NULL DEFAULT 0.0,
     jobs_completed  INTEGER NOT NULL DEFAULT 0,
     jobs_posted     INTEGER NOT NULL DEFAULT 0,
+    daily_withdrawal INTEGER NOT NULL DEFAULT 0,
+    last_withdrawal_date TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

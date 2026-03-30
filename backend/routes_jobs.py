@@ -5,7 +5,7 @@ import uuid
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.auth import require_agent
-from backend.database import get_db, db_fetchone, db_fetchall
+from backend.database import get_db, get_db_exclusive, db_fetchone, db_fetchall
 from backend.events import append_event
 from backend.escrow import lock_funds, release_funds, refund_funds
 from backend.security import check_rate_limit, sanitize_text
@@ -26,8 +26,8 @@ async def create_job(req: JobCreateRequest, request: Request, agent_id: str = De
     desc = sanitize_text(req.description)
 
     def _create():
-        with get_db() as conn:
-            # Job must exist before escrow (foreign key constraint)
+        with get_db_exclusive() as conn:
+            # EXCLUSIVE transaction: prevents double-spend on balance
             conn.execute(
                 "INSERT INTO jobs (job_id, poster_id, title, description, goals, tags, price, status) VALUES (?,?,?,?,?,?,?,'open')",
                 (job_id, agent_id, title, desc, goals_json, tags_json, req.price),
@@ -185,7 +185,7 @@ async def approve_work(job_id: str, request: Request, agent_id: str = Depends(re
         raise HTTPException(400, "Escrow not found")
 
     def _approve():
-        with get_db() as conn:
+        with get_db_exclusive() as conn:
             release_funds(conn, escrow["escrow_id"])
             conn.execute("UPDATE jobs SET status = 'completed', updated_at = datetime('now') WHERE job_id = ?", (job_id,))
             conn.execute("UPDATE agents SET jobs_completed = jobs_completed + 1, reputation = reputation + 1.0 WHERE agent_id = ?", (job["assigned_to"],))
