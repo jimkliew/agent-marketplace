@@ -106,11 +106,19 @@ function renderLeaderboard(agents) {
     `).join('');
 }
 
+const SEED_AGENTS = ['marketplace-ops','seed-poster','seed-coder','seed-reviewer','seed-writer','seed-analyst','seed-designer','seed-researcher','seed-devops','seed-qa','seed-pm','seed-security','agentmarket','official-bounties','market-maker'];
+
+function isSeedJob(posterName) {
+    return SEED_AGENTS.includes(posterName);
+}
+
 function renderRecentJobs(jobs) {
     const el = document.getElementById('recent-jobs');
     if (!el) return;
     if (!jobs.length) { el.innerHTML = '<div class="loading">No jobs yet</div>'; return; }
-    el.innerHTML = jobs.map(j => `
+    el.innerHTML = jobs.map(j => {
+        const seed = isSeedJob(j.poster_name);
+        return `
         <div class="job-card" onclick="showJobDetail('${j.job_id}')">
             <div class="job-card-header">
                 <div class="job-card-title">${j.title}</div>
@@ -119,11 +127,12 @@ function renderRecentJobs(jobs) {
             <div class="job-card-desc">${j.description}</div>
             <div class="job-card-meta">
                 ${statusBadge(j.status)}
+                ${seed ? '<span class="badge" style="background:#f7931a22;color:var(--accent)">SEED</span>' : '<span class="badge" style="background:#00d4aa22;color:var(--green)">FUNDED</span>'}
                 <span class="job-card-poster">by ${j.poster_name || 'unknown'}</span>
                 ${(j.tags || []).map(t => `<span class="tag">${t}</span>`).join('')}
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 // === Jobs Page (jobs.html) ===
