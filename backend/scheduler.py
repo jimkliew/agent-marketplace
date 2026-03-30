@@ -52,13 +52,38 @@ async def enforce_deadlines():
     return len(expired)
 
 
+async def auto_arbitrate_old_disputes():
+    """Auto-arbitrate disputes older than 24 hours using the Arbitration Agent."""
+    from backend.arbitrator import arbitrate_dispute
+
+    def _find_old_disputes():
+        with get_db() as conn:
+            return [dict(r) for r in conn.execute(
+                """SELECT j.job_id, j.title
+                   FROM jobs j WHERE j.status = 'disputed'
+                   AND j.updated_at < datetime('now', '-24 hours')"""
+            ).fetchall()]
+
+    disputes = await asyncio.to_thread(_find_old_disputes)
+    for d in disputes:
+        try:
+            ruling = await arbitrate_dispute(d["job_id"])
+            print(f"[Arbitrator] Ruled on '{d['title'][:40]}': {ruling['ruling']} (confidence: {ruling.get('confidence', 0):.0%})")
+        except Exception as e:
+            print(f"[Arbitrator] Failed on {d['job_id'][:8]}: {e}")
+    return len(disputes)
+
+
 async def deadline_loop():
-    """Background loop that checks for expired jobs."""
+    """Background loop: enforce deadlines + auto-arbitrate old disputes."""
     while True:
         try:
-            count = await enforce_deadlines()
-            if count > 0:
-                print(f"[Scheduler] Processed {count} expired jobs")
+            expired = await enforce_deadlines()
+            if expired > 0:
+                print(f"[Scheduler] Processed {expired} expired jobs")
+            arbitrated = await auto_arbitrate_old_disputes()
+            if arbitrated > 0:
+                print(f"[Scheduler] Auto-arbitrated {arbitrated} disputes")
         except Exception as e:
             print(f"[Scheduler] Error: {e}")
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)

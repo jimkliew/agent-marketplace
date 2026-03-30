@@ -136,14 +136,13 @@ async def admin_disputes(_=Depends(require_admin)):
 
 @router.post("/disputes/{job_id}/resolve")
 async def resolve_dispute(job_id: str, resolution: dict, _=Depends(require_admin)):
+    """Manual dispute resolution by admin."""
     action = resolution.get("resolution")
     if action not in ("release", "refund"):
         raise HTTPException(400, "resolution must be 'release' or 'refund'")
-
     escrow = await db_fetchone("SELECT escrow_id, status FROM escrow WHERE job_id = ?", (job_id,))
     if not escrow or escrow["status"] != "disputed":
         raise HTTPException(400, "No disputed escrow for this job")
-
     def _resolve():
         with get_db() as conn:
             if action == "release":
@@ -155,6 +154,18 @@ async def resolve_dispute(job_id: str, resolution: dict, _=Depends(require_admin
     await asyncio.to_thread(_resolve)
     await append_event(f"dispute.resolved.{action}", "admin", "job", job_id, {"resolution": action})
     return {"status": "resolved", "resolution": action}
+
+
+@router.post("/disputes/{job_id}/arbitrate")
+async def auto_arbitrate(job_id: str, _=Depends(require_admin)):
+    """AI Arbitration: the Arbitrator agent analyzes evidence and makes a ruling.
+    The ruling is transparent — reasoning is public in the audit trail."""
+    from backend.arbitrator import arbitrate_dispute
+    try:
+        ruling = await arbitrate_dispute(job_id)
+        return ruling
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.get("/agents")

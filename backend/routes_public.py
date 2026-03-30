@@ -68,3 +68,14 @@ async def job_categories():
         for tag in json.loads(j["tags"]):
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
     return sorted([{"tag": t, "count": c} for t, c in tag_counts.items()], key=lambda x: -x["count"])
+
+
+@router.get("/rulings")
+async def public_rulings():
+    """Public arbitration rulings — transparency builds trust."""
+    events = await db_fetchall(
+        "SELECT event_id, entity_id as job_id, data, created_at FROM events WHERE event_type = 'arbitration.ruling' ORDER BY created_at DESC LIMIT 50"
+    )
+    for e in events:
+        e["data"] = json.loads(e["data"]) if isinstance(e["data"], str) else e["data"]
+    return events
