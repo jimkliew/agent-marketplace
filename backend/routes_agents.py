@@ -1,5 +1,6 @@
 """Agent registration and ANS lookup. All balances in satoshis."""
 
+import os
 import json
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -13,6 +14,9 @@ from backend.models import AgentRegisterRequest, AgentRegisterResponse, AgentPro
 router = APIRouter()
 
 
+WELCOME_BONUS = int(os.getenv("WELCOME_BONUS", "1000"))  # 1,000 sats free on signup
+
+
 @router.post("/register", response_model=AgentRegisterResponse)
 async def register_agent(req: AgentRegisterRequest, request: Request):
     ip = request.client.host if request.client else "unknown"
@@ -24,6 +28,7 @@ async def register_agent(req: AgentRegisterRequest, request: Request):
     name = req.agent_name
     display = sanitize_text(req.display_name)
     desc = sanitize_text(req.description)
+    referrer = sanitize_text(req.referrer) if hasattr(req, 'referrer') and req.referrer else None
 
     import asyncio
     def _create():
@@ -31,19 +36,38 @@ async def register_agent(req: AgentRegisterRequest, request: Request):
             existing = conn.execute("SELECT 1 FROM agents WHERE agent_name = ?", (name,)).fetchone()
             if existing:
                 raise ValueError("duplicate")
+            # Register with welcome bonus
             conn.execute(
-                "INSERT INTO agents (agent_id, agent_name, display_name, description, token_hash, balance) VALUES (?,?,?,?,?,0)",
-                (agent_id, name, display, desc, token_hashed),
+                "INSERT INTO agents (agent_id, agent_name, display_name, description, token_hash, balance) VALUES (?,?,?,?,?,?)",
+                (agent_id, name, display, desc, token_hashed, WELCOME_BONUS),
             )
+            # Ledger entry for welcome bonus
+            if WELCOME_BONUS > 0:
+                import uuid as _uuid
+                tx_id = str(_uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO ledger (tx_id, from_agent_id, to_agent_id, amount, currency, unit, tx_type, description) VALUES (?,NULL,?,?,?,?,'deposit',?)",
+                    (tx_id, agent_id, WELCOME_BONUS, 'BTC', 'sats', f"Welcome bonus: {WELCOME_BONUS} sats"),
+                )
+            # Referral tracking
+            if referrer:
+                ref_agent = conn.execute("SELECT agent_id FROM agents WHERE agent_name = ?", (referrer,)).fetchone()
+                if ref_agent:
+                    conn.execute(
+                        "INSERT INTO events (event_id, event_type, actor_id, entity_type, entity_id, data) VALUES (?,?,?,?,?,?)",
+                        (str(_uuid.uuid4()), "referral.registered", agent_id, "agent", ref_agent["agent_id"],
+                         json.dumps({"referred": name, "referrer": referrer})),
+                    )
     try:
         await asyncio.to_thread(_create)
     except ValueError:
         raise HTTPException(409, f"Agent name '{name}' already taken")
 
-    await append_event("agent.registered", agent_id, "agent", agent_id, {"agent_name": name}, ip)
+    await append_event("agent.registered", agent_id, "agent", agent_id,
+        {"agent_name": name, "welcome_bonus": WELCOME_BONUS, "referrer": referrer}, ip)
     return AgentRegisterResponse(
         agent_id=agent_id, agent_name=name, token=token,
-        balance=0, email=f"{name}@agentmarket.local",
+        balance=WELCOME_BONUS, email=f"{name}@agentmarket.local",
     )
 
 

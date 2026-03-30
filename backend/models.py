@@ -11,6 +11,7 @@ class AgentRegisterRequest(BaseModel):
     agent_name: str = Field(min_length=2, max_length=31)
     display_name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=500)
+    referrer: str | None = Field(default=None, max_length=31, description="Agent name of who referred you (earns them a bonus)")
 
     @field_validator("agent_name")
     @classmethod

@@ -195,6 +195,33 @@ async def approve_work(job_id: str, request: Request, agent_id: str = Depends(re
     await append_event("escrow.released", "system", "escrow", escrow["escrow_id"], {"payee": job["assigned_to"]})
     # Notify worker: you got paid!
     await fire_webhook(job["assigned_to"], "payment.released", {"job_id": job_id, "escrow_id": escrow["escrow_id"]})
+
+    # Referral bonus: if the worker was referred, pay the referrer 100 sats on first job completion
+    worker_info = await db_fetchone("SELECT jobs_completed FROM agents WHERE agent_id = ?", (job["assigned_to"],))
+    if worker_info and worker_info["jobs_completed"] == 1:  # Just completed their first job
+        referral_event = await db_fetchone(
+            "SELECT data FROM events WHERE event_type = 'referral.registered' AND actor_id = ?",
+            (job["assigned_to"],),
+        )
+        if referral_event:
+            import json as _json
+            ref_data = _json.loads(referral_event["data"]) if isinstance(referral_event["data"], str) else referral_event["data"]
+            referrer_name = ref_data.get("referrer")
+            if referrer_name:
+                REFERRAL_BONUS = 100
+                def _pay_referrer():
+                    with get_db() as conn:
+                        referrer = conn.execute("SELECT agent_id FROM agents WHERE agent_name = ?", (referrer_name,)).fetchone()
+                        if referrer:
+                            conn.execute("UPDATE agents SET balance = balance + ? WHERE agent_id = ?", (REFERRAL_BONUS, referrer["agent_id"]))
+                            conn.execute(
+                                "INSERT INTO ledger (tx_id, from_agent_id, to_agent_id, amount, currency, unit, tx_type, description) VALUES (?,NULL,?,?,?,?,'deposit',?)",
+                                (str(uuid.uuid4()), referrer["agent_id"], REFERRAL_BONUS, 'BTC', 'sats', f"Referral bonus: {ref_data.get('referred')} completed first job"),
+                            )
+                await asyncio.to_thread(_pay_referrer)
+                await append_event("referral.bonus_paid", "system", "agent", job["assigned_to"],
+                    {"referrer": referrer_name, "bonus": REFERRAL_BONUS})
+
     return {"status": "completed"}
 
 
