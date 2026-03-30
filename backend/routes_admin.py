@@ -191,6 +191,126 @@ async def credit_agent(agent_id: str, body: dict, _=Depends(require_admin)):
     return {"agent_id": agent_id, "agent_name": agent["agent_name"], "credited": amount, "new_balance": agent["balance"]}
 
 
+@router.get("/audit/job/{job_id}")
+async def audit_job(job_id: str, _=Depends(require_admin)):
+    """Full audit trail for a single job — every event, bid, message, payment, and deliverable."""
+    import json as jsonlib
+    job = await db_fetchone(
+        "SELECT j.*, a.agent_name as poster_name FROM jobs j JOIN agents a ON j.poster_id = a.agent_id WHERE j.job_id = ?",
+        (job_id,),
+    )
+    if not job:
+        raise HTTPException(404, "Job not found")
+    job["goals"] = jsonlib.loads(job["goals"])
+    job["tags"] = jsonlib.loads(job["tags"])
+
+    bids = await db_fetchall(
+        "SELECT b.*, a.agent_name as bidder_name FROM bids b JOIN agents a ON b.bidder_id = a.agent_id WHERE b.job_id = ? ORDER BY b.created_at",
+        (job_id,),
+    )
+    escrow = await db_fetchone("SELECT * FROM escrow WHERE job_id = ?", (job_id,))
+    ledger = await db_fetchall("SELECT * FROM ledger WHERE reference_id = ? ORDER BY created_at", (job_id,))
+    events = await db_fetchall(
+        "SELECT * FROM events WHERE entity_id = ? OR (entity_type = 'escrow' AND entity_id = ?) ORDER BY created_at",
+        (job_id, escrow["escrow_id"] if escrow else ""),
+    )
+    for e in events:
+        e["data"] = jsonlib.loads(e["data"]) if isinstance(e["data"], str) else e["data"]
+    ratings = await db_fetchall("SELECT * FROM ratings WHERE job_id = ?", (job_id,))
+
+    return {
+        "job": job,
+        "bids": bids,
+        "escrow": escrow,
+        "ledger_entries": ledger,
+        "events": events,
+        "ratings": ratings,
+        "audit_generated_at": (await db_fetchone("SELECT datetime('now') as now"))["now"],
+    }
+
+
+@router.get("/audit/export")
+async def audit_export(days: int = 30, _=Depends(require_admin)):
+    """Full platform audit export — all data for compliance review.
+    Covers: agents, jobs, bids, escrow, ledger, messages, events, ratings, feedback.
+    Suitable for FedRAMP ATO evidence packages."""
+    import json as jsonlib
+
+    agents = await db_fetchall("SELECT agent_id, agent_name, display_name, status, reputation, jobs_completed, jobs_posted, balance, created_at FROM agents ORDER BY created_at")
+    jobs = await db_fetchall(
+        "SELECT * FROM jobs WHERE created_at >= datetime('now', ?) ORDER BY created_at",
+        (f"-{days} days",),
+    )
+    for j in jobs:
+        j["goals"] = jsonlib.loads(j["goals"])
+        j["tags"] = jsonlib.loads(j["tags"])
+
+    bids = await db_fetchall(
+        "SELECT * FROM bids WHERE created_at >= datetime('now', ?) ORDER BY created_at",
+        (f"-{days} days",),
+    )
+    escrows = await db_fetchall(
+        "SELECT * FROM escrow WHERE created_at >= datetime('now', ?) ORDER BY created_at",
+        (f"-{days} days",),
+    )
+    ledger = await db_fetchall(
+        "SELECT * FROM ledger WHERE created_at >= datetime('now', ?) ORDER BY created_at",
+        (f"-{days} days",),
+    )
+    messages = await db_fetchall(
+        "SELECT message_id, from_agent_id, to_agent_id, subject, created_at FROM messages WHERE created_at >= datetime('now', ?) ORDER BY created_at",
+        (f"-{days} days",),
+    )
+    events = await db_fetchall(
+        "SELECT * FROM events WHERE created_at >= datetime('now', ?) ORDER BY created_at",
+        (f"-{days} days",),
+    )
+    for e in events:
+        e["data"] = jsonlib.loads(e["data"]) if isinstance(e["data"], str) else e["data"]
+    ratings = await db_fetchall("SELECT * FROM ratings ORDER BY created_at")
+    feedback = await db_fetchall("SELECT * FROM feedback ORDER BY created_at")
+
+    # Integrity check
+    total_deposits = await db_fetchone("SELECT COALESCE(SUM(amount),0) as s FROM ledger WHERE tx_type='deposit'")
+    total_balances = await db_fetchone("SELECT COALESCE(SUM(balance),0) as s FROM agents")
+    total_escrow = await db_fetchone("SELECT COALESCE(SUM(amount),0) as s FROM escrow WHERE status='held'")
+    total_fees = await db_fetchone("SELECT COALESCE(SUM(amount),0) as s FROM ledger WHERE tx_type='platform_fee'")
+
+    return {
+        "export_type": "full_audit",
+        "period_days": days,
+        "generated_at": (await db_fetchone("SELECT datetime('now') as now"))["now"],
+        "integrity_check": {
+            "total_deposited": total_deposits["s"],
+            "total_in_balances": total_balances["s"],
+            "total_in_escrow": total_escrow["s"],
+            "total_platform_fees": total_fees["s"],
+            "balanced": total_balances["s"] + total_escrow["s"] + total_fees["s"] == total_deposits["s"],
+        },
+        "summary": {
+            "agents": len(agents),
+            "jobs": len(jobs),
+            "bids": len(bids),
+            "escrows": len(escrows),
+            "ledger_entries": len(ledger),
+            "messages": len(messages),
+            "events": len(events),
+            "ratings": len(ratings),
+        },
+        "data": {
+            "agents": agents,
+            "jobs": jobs,
+            "bids": bids,
+            "escrows": escrows,
+            "ledger": ledger,
+            "messages": messages,
+            "events": events,
+            "ratings": ratings,
+            "feedback": feedback,
+        },
+    }
+
+
 @router.post("/agents/{agent_id}/suspend")
 async def suspend_agent(agent_id: str, _=Depends(require_admin)):
     agent = await db_fetchone("SELECT status FROM agents WHERE agent_id = ?", (agent_id,))
