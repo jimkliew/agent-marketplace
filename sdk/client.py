@@ -1,17 +1,45 @@
-"""AgentMarket SDK Client — synchronous Python client for the AgentMarket API."""
+"""AgentMarket SDK Client — build agents that earn sats.
 
+Three ways to fund your agent:
+
+    # Phase 1: Admin credits (testing)
+    agent = AgentMarketClient("https://agent-marketplace.fly.dev")
+    agent.register("my-agent", "My Agent", "Code review")
+    agent.deposit(1000)  # credits from admin, no real sats
+
+    # Phase 2: External wallet (Alby — real sats, easy setup)
+    agent = AgentMarketClient("https://agent-marketplace.fly.dev", wallet="alby")
+    agent.register("my-agent", "My Agent", "Code review")
+    agent.deposit(1000)  # auto-pays Lightning invoice from your Alby wallet
+
+    # Phase 3: Self-sovereign (your own Lightning node — real sats, no third party)
+    agent = AgentMarketClient("https://agent-marketplace.fly.dev", wallet="sovereign")
+    agent.register("my-agent", "My Agent", "Code review")
+    agent.deposit(1000)  # pays from your own LND node
+"""
+
+import asyncio
 import httpx
 
 
 class AgentMarketClient:
-    """Simple client for AgentMarket. All amounts in satoshis."""
+    """Simple client for AgentMarket. All amounts in satoshis.
 
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    Args:
+        base_url: AgentMarket server URL
+        wallet: Payment method — "mock" (phase 1), "alby" (phase 2), "sovereign" (phase 3)
+        wallet_kwargs: Extra args for wallet (api_key, lnd_url, macaroon, etc.)
+    """
+
+    def __init__(self, base_url: str = "http://localhost:8000", wallet: str = "", **wallet_kwargs):
         self.base_url = base_url.rstrip("/")
         self.token = None
         self.agent_id = None
         self.agent_name = None
         self._client = httpx.Client(base_url=self.base_url, timeout=30)
+        self._wallet_type = wallet
+        self._wallet_kwargs = wallet_kwargs
+        self._wallet = None
 
     def _auth(self) -> dict:
         if not self.token:
@@ -55,12 +83,42 @@ class AgentMarketClient:
             f"/api/agents/{self.agent_id}/balance", headers=self._auth()))
         return data["balance"]
 
+    def _get_wallet(self):
+        """Lazy-load the wallet integration."""
+        if self._wallet is None:
+            from sdk.wallet import get_wallet
+            self._wallet = get_wallet(self._wallet_type, **self._wallet_kwargs)
+        return self._wallet
+
     # --- Money ---
 
     def deposit(self, amount: int) -> dict:
-        """Deposit sats into your account."""
-        return self._check(self._client.post("/api/escrow/deposit",
+        """Deposit sats. Auto-pays Lightning invoice if wallet is configured.
+
+        Phase 1 (mock): credits balance directly (no real sats)
+        Phase 2 (alby/lnbits): creates invoice, agent wallet pays it automatically
+        Phase 3 (sovereign): creates invoice, agent's own LND node pays it
+        """
+        result = self._check(self._client.post("/api/escrow/deposit",
             json={"amount": amount}, headers=self._auth()))
+
+        # If the server returned an invoice to pay (real Lightning mode)
+        if result.get("status") == "awaiting_payment" and result.get("payment_request"):
+            wallet = self._get_wallet()
+            if wallet.name == "mock":
+                return result  # Can't auto-pay in mock mode, return invoice for manual payment
+            # Auto-pay the invoice
+            pay_result = asyncio.run(wallet.pay_invoice(result["payment_request"], amount))
+            if pay_result.get("status") == "paid":
+                # Confirm payment with the platform
+                invoice_id = result.get("invoice_id", "")
+                if invoice_id:
+                    confirm = self._check(self._client.get(
+                        f"/api/escrow/invoice/{invoice_id}", headers=self._auth()))
+                    return {**confirm, "wallet": wallet.name, "auto_paid": True}
+            return {**result, "wallet_payment": pay_result}
+
+        return result
 
     def transactions(self, page: int = 1) -> list:
         """Get your transaction history."""
