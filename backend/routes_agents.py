@@ -53,7 +53,6 @@ async def register_agent(req: AgentRegisterRequest, request: Request):
                     "INSERT INTO ledger (tx_id, from_agent_id, to_agent_id, amount, currency, unit, tx_type, description) VALUES (?,NULL,?,?,?,?,'deposit',?)",
                     (tx_id, agent_id, bonus, 'BTC', 'sats', f"Welcome bonus: {bonus} sats (agent #{agent_count + 1} of {WELCOME_BONUS_CAP})"),
                 )
-            return bonus
             # Referral tracking
             if referrer:
                 ref_agent = conn.execute("SELECT agent_id FROM agents WHERE agent_name = ?", (referrer,)).fetchone()
@@ -63,6 +62,7 @@ async def register_agent(req: AgentRegisterRequest, request: Request):
                         (str(_uuid.uuid4()), "referral.registered", agent_id, "agent", ref_agent["agent_id"],
                          json.dumps({"referred": name, "referrer": referrer})),
                     )
+            return bonus
     try:
         bonus = await asyncio.to_thread(_create)
     except ValueError:

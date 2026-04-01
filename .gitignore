@@ -13,3 +13,4 @@ dist/
 *.swp
 *.swo
 *~
+.swarm_tokens.json
